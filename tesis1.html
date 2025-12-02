@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Simulación Tesis Perú</title>
+    <style>
+        :root { --bg: #121212; --panel: #1e1e1e; --accent: #00e676; --text: #e0e0e0; }
+        body { font-family: 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); margin: 0; display: flex; flex-direction: column; align-items: center; height: 100vh; overflow: hidden; }
+        
+        /* LAYOUT */
+        .container { width: 98%; max-width: 1400px; height: 95vh; display: flex; flex-direction: column; gap: 10px; }
+        
+        /* HEADER */
+        header { background: var(--panel); padding: 15px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #333; }
+        h1 { margin: 0; font-size: 1.4rem; color: #ffca28; }
+        .subtitle { font-size: 0.8rem; color: #888; }
+        .status-badge { background: #333; padding: 5px 15px; border-radius: 4px; font-weight: bold; color: #fff; border: 1px solid #555; }
+
+        /* DASHBOARD METRICS */
+        .dashboard { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
+        .card { background: #252525; padding: 10px; border-radius: 6px; text-align: center; border-top: 3px solid #555; }
+        .card .lbl { font-size: 0.65rem; color: #aaa; display: block; margin-bottom: 4px; font-weight: bold; letter-spacing: 1px; }
+        .card .val { font-size: 1.2rem; font-weight: bold; }
+        
+        /* Colores específicos */
+        .c-blue { border-color: #29b6f6; } .c-red { border-color: #ef5350; }
+        .c-org { border-color: #ffa726; } .c-pur { border-color: #ab47bc; }
+        .c-grn { border-color: #66bb6a; }
+
+        /* CANVAS AREA */
+        .viewport { flex-grow: 1; position: relative; background: #37474f; border-radius: 8px; overflow: hidden; border: 2px solid #444; }
+        canvas { display: block; width: 100%; height: 100%; }
+        
+        /* LEYENDA FLOTANTE */
+        .legend { position: absolute; bottom: 15px; right: 15px; background: rgba(0,0,0,0.85); padding: 8px; border-radius: 6px; display: flex; gap: 15px; font-size: 0.75rem; pointer-events: none; }
+        .item { display: flex; align-items: center; gap: 5px; }
+        .dot { width: 10px; height: 10px; border-radius: 50%; }
+
+        /* CONTROLES */
+        .controls { background: var(--panel); padding: 10px; border-radius: 8px; display: flex; gap: 15px; align-items: center; }
+        button { background: #333; color: white; border: none; padding: 10px 20px; border-radius: 4px; font-weight: bold; cursor: pointer; transition: 0.2s; }
+        .btn-start { background: var(--accent); color: #003300; } .btn-start:hover { filter: brightness(1.1); }
+        .btn-reset { background: #d32f2f; }
+        
+        .slider-group { flex-grow: 1; display: flex; align-items: center; gap: 10px; }
+        input[type=range] { width: 100%; cursor: pointer; accent-color: var(--accent); }
+        
+        /* NOTIFICACIONES EN CANVAS */
+        #overlay-msg { 
+            position: absolute; top: 20px; left: 50%; transform: translateX(-50%); 
+            background: rgba(0,0,0,0.8); color: white; padding: 10px 20px; 
+            border-radius: 20px; font-weight: bold; display: none; 
+            border: 1px solid var(--accent);
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <div>
+            <h1>ANÁLISIS Y PROPUESTA DE MEJORA DE PROCESOS EN LA RUTA DE
+UNA LÍNEA DE TRANSPORTE URBANO</h1>
+            <div class="subtitle">22 Buses | 26 Choferes | Rotación cada 5 Vueltas</div>
+        </div>
+        <div class="status-badge" id="sys-phase">ESPERANDO INICIO</div>
+    </header>
+
+    <div class="dashboard">
+        <div class="card c-blue">
+            <span class="lbl">HORA SIMULADA</span>
+            <span class="val" id="clock">07:00</span>
+        </div>
+        <div class="card c-red">
+            <span class="lbl">CHOFERES DISP.</span>
+            <span class="val" id="drivers">26</span>
+        </div>
+        <div class="card c-org">
+            <span class="lbl">FLOTA EN RUTA</span>
+            <span class="val" id="fleet-active">0 / 22</span>
+        </div>
+        <div class="card c-pur">
+            <span class="lbl">EN TALLER</span>
+            <span class="val" id="fleet-maint">0</span>
+        </div>
+        <div class="card c-grn">
+            <span class="lbl">PASAJEROS TOTAL</span>
+            <span class="val" id="pax-total">0</span>
+        </div>
+        <div class="card c-red">
+            <span class="lbl">EN ESPERA</span>
+            <span class="val" id="pax-wait">0</span>
+        </div>
+    </div>
+
+    <div class="viewport">
+        <canvas id="simCanvas"></canvas>
+        <div id="overlay-msg">JORNADA FINALIZADA - SISTEMA CERRADO</div>
+        <div class="legend">
+            <div class="item"><span class="dot" style="background:#fdd835"></span>Ida</div>
+            <div class="item"><span class="dot" style="background:#fb8c00"></span>Vuelta</div>
+            <div class="item"><span class="dot" style="background:#9c27b0"></span>Taller</div>
+            <div class="item"><span class="dot" style="background:#00e676"></span>Paradero Abierto</div>
+            <div class="item"><span class="dot" style="background:#d32f2f"></span>Paradero Cerrado</div>
+        </div>
+    </div>
+
+    <div class="controls">
+        <button class="btn-start" id="btn-toggle" onclick="toggleSim()">▶ INICIAR</button>
+        <div class="slider-group">
+            <span>Velocidad:</span>
+            <input type="range" id="speed" min="1" max="100" value="10" oninput="updateLabel(this.value)">
+            <span id="speed-label" style="width:40px">10x</span>
+        </div>
+        <button class="btn-reset" onclick="resetSim()">↺ REINICIAR</button>
+    </div>
+</div>
+
+<script>
+/* ================= CONFIGURACIÓN (TESIS) ================= */
+const CFG = {
+    flota: 22,
+    choferesTotal: 26,
+    capacidad: 55,
+    maxVueltas: 5,          // Rotación a taller tras 5 vueltas
+    tiempoTaller: 60 * 60,  // 1 hora simulada en mantenimiento
+    
+    // Horarios (Segundos)
+    hInicio: 7 * 3600,
+    hCierre: 21 * 3600,     // 21:00 -> Paraderos Cierran
+    hFinDespacho: 21 * 3600 + 1800, // 21:30 -> Último bus sale
+    hFinTotal: 23 * 3600 + 1800, // 23:30 -> Fin absoluto
+    
+    // Frecuencias de Salida
+    frecuencias: [
+        { h: 7, int: 600 },  // 10 min
+        { h: 9, int: 480 },  // 8 min
+        { h: 15, int: 360 }, // 6 min (Pico)
+        { h: 19, int: 660 }, // 11 min
+        { h: 24, int: 9999 }
+    ],
+    
+    // Rutas
+    ida: ["Patio", "Argentina", "Plaza Unión", "2 de Mayo", "Tacna", "San Martín", "Universitario", "Grau"],
+    vuelta: ["Grau", "Paruro", "Cuzco", "Abancay", "Pierola", "2 de Mayo", "Argentina", "Patio"]
+};
+
+/* ================= ESTADO GLOBAL ================= */
+let t = CFG.hInicio;
+let proxSalida = CFG.hInicio;
+let running = false;
+let choferesLibres = CFG.choferesTotal;
+let buses = [];
+let paraderos = [];
+let stats = { atendidos: 0, viajes: 0 };
+let ctx, canvas;
+let fase = "ESPERA";
+
+/* ================= INICIALIZACIÓN ================= */
+window.onload = () => {
+    canvas = document.getElementById('simCanvas');
+    resizeCanvas();
+    ctx = canvas.getContext('2d');
+    window.addEventListener('resize', resizeCanvas);
+    init();
+    draw();
+};
+
+function resizeCanvas() {
+    canvas.width = canvas.parentElement.clientWidth;
+    canvas.height = canvas.parentElement.clientHeight;
+}
+
+function init() {
+    // Crear Paraderos
+    paraderos = [];
+    let w = canvas.width - 300; // Margen para Patio
+    CFG.ida.forEach((n, i) => paraderos.push(new Stop(i, n, true, 160, w)));
+    CFG.vuelta.forEach((n, i) => paraderos.push(new Stop(i, n, false, 400, w)));
+
+    // Crear Buses
+    buses = [];
+    for(let i=0; i<CFG.flota; i++) buses.push(new Bus(i+1));
+    
+    // Reset
+    t = CFG.hInicio;
+    proxSalida = CFG.hInicio;
+    choferesLibres = CFG.choferesTotal;
+    stats = { atendidos: 0, viajes: 0 };
+    fase = "NORMAL";
+    document.getElementById('overlay-msg').style.display = 'none';
+    updateUI();
+}
+
+/* ================= CLASES LÓGICAS ================= */
+class Stop {
+    constructor(idx, nombre, esIda, y, width) {
+        this.nombre = nombre;
+        this.esIda = esIda;
+        this.esTerminal = (esIda && idx===7) || (!esIda && idx===7);
+        this.y = y;
+        
+        let margenX = 250;
+        this.x = esIda ? margenX + (width/7)*idx : (margenX + width) - (width/7)*idx;
+        
+        this.cola = 0;
+        this.acc = 0;
+        this.abierto = true;
+        // Peso: Plazas y Grau atraen más gente
+        this.peso = (nombre.includes("Plaza") || nombre.includes("Grau")) ? 1.5 : 0.7;
+    }
+
+    update(dt, hora) {
+        if(!this.abierto || this.esTerminal) return;
+        
+        // Curva de Demanda
+        let h = hora / 3600;
+        let factor = 0.5;
+        if(h >= 7 && h < 9) factor = 2.5; // Pico AM
+        if(h >= 18 && h < 20) factor = 3.5; // Pico PM
+
+        // Tasa ajustada para 6200 pax
+        let tasa = 0.008 * this.peso * factor; 
+        this.acc += tasa * dt;
+        
+        if(this.acc >= 1) {
+            let n = Math.floor(this.acc);
+            this.cola += n;
+            this.acc -= n;
+        }
+    }
+}
+
+class Bus {
+    constructor(id) {
+        this.id = id;
+        this.cap = CFG.capacidad;
+        this.pax = 0;
+        this.vueltas = 0;
+        // 0:Reserva, 1:ColaSalida, 2:Ida, 3:Vuelta, 4:Taller
+        this.estado = 0; 
+        this.timer = 0;
+        this.pos = 0; 
+        this.idxP = 0;
+        
+        this.x = 0; this.y = 0; 
+        this.tx = 0; this.ty = 0;
+        this.calcTarget();
+        this.x = this.tx; this.y = this.ty;
+    }
+
+    update(dt, pIda, pVuelta, finJornada) {
+        // --- MANTENIMIENTO ---
+        if(this.estado === 4) {
+            this.timer -= dt;
+            if(this.timer <= 0 && !finJornada) {
+                this.estado = 0; // Reparado -> Reserva
+                this.vueltas = 0;
+            }
+            this.calcTarget(); this.visual(dt);
+            return;
+        }
+
+        // --- PATIO / COLA ---
+        if(this.estado === 0 || this.estado === 1) {
+            this.calcTarget(); this.visual(dt);
+            return;
+        }
+
+        // --- RUTA ---
+        let vel = 0.035; // Base
+        if(t > 18*3600 && t < 20*3600) vel *= 0.85; // Tráfico hora punta
+        if(finJornada) vel *= 1.5; // Retorno a garaje rápido
+
+        this.pos += vel * dt;
+
+        let ruta = (this.estado === 2) ? pIda : pVuelta;
+        let tramo = 100 / 7;
+        let idx = Math.floor(this.pos / tramo);
+
+        // Paradas
+        if(idx > this.idxP && idx < 8) {
+            this.idxP = idx;
+            this.interactuar(ruta[idx]);
+        }
+
+        // Fin de Tramo
+        if(this.pos >= 100) {
+            if(this.estado === 2) { // Fin Ida
+                this.estado = 3; // Vuelta
+                this.pos = 0;
+                this.idxP = 0;
+                this.interactuar(pVuelta[0]);
+            } else { // Fin Vuelta -> Patio
+                this.finalizarViaje(finJornada);
+            }
+        }
+        this.calcTarget(); this.visual(dt);
+    }
+
+    interactuar(p) {
+        let factor = p.esTerminal ? 1.0 : 0.25;
+        let bajan = Math.floor(this.pax * factor);
+        this.pax -= bajan;
+
+        if(p.cola > 0 && !p.esTerminal && p.abierto) {
+            let caben = this.cap - this.pax;
+            let suben = Math.min(p.cola, caben);
+            this.pax += suben;
+            p.cola -= suben;
+            stats.atendidos += suben;
+        }
+    }
+
+    finalizarViaje(finJornada) {
+        stats.viajes++;
+        this.vueltas++;
+        this.pax = 0;
+        choferesLibres++; // Chofer descansa
+
+        if(finJornada) {
+            this.estado = 0; // A dormir
+        } else {
+            if(this.vueltas >= CFG.maxVueltas) {
+                this.estado = 4; // Taller
+                this.timer = CFG.tiempoTaller;
+            } else {
+                this.estado = 0; // Reserva
+            }
+        }
+    }
+
+    visual(dt) {
+        // Interpolación suave
+        this.x += (this.tx - this.x) * 0.2 * dt;
+        this.y += (this.ty - this.y) * 0.2 * dt;
+    }
+
+    calcTarget() {
+        // Coordenadas visuales según estado
+        if(this.estado === 1) { // Cola Salida
+            this.tx = 220; this.ty = 200;
+        } else if(this.estado === 4) { // Taller
+            let i = this.id - 1;
+            this.tx = 40 + (i%6)*30;
+            this.ty = 480 + Math.floor(i/6)*25;
+        } else if(this.estado === 0) { // Depot Reserva
+            let col = (this.id - 1) % 2;
+            let row = Math.floor((this.id - 1) / 2);
+            this.tx = 40 + col * 50;
+            this.ty = 150 + row * 28;
+        } else if(this.estado === 2) { // Ruta Ida
+            let w = canvas.width - 300;
+            this.tx = 250 + (w * this.pos / 100);
+            this.ty = 160;
+        } else { // Ruta Vuelta
+            let w = canvas.width - 300;
+            this.tx = (250 + w) - (w * this.pos / 100);
+            this.ty = 400;
+        }
+    }
+}
+
+/* ================= MOTOR DE SIMULACIÓN ================= */
+
+function toggleSim() {
+    if(fase === 'FIN') { resetSim(); return; }
+    running = !running;
+    document.getElementById('btn-toggle').innerText = running ? "⏸ PAUSAR" : "▶ CONTINUAR";
+    if(running) loop();
+}
+
+function loop() {
+    if(!running) return;
+    let speed = parseInt(document.getElementById('speed').value);
+    // Pasos fijos para estabilidad matemática
+    let steps = Math.ceil(speed / 2);
+    
+    for(let i=0; i<steps; i++) simStep(1.0); // 1 segundo por paso
+    
+    draw();
+    updateUI();
+    requestAnimationFrame(loop);
+}
+
+function simStep(dt) {
+    t += dt;
+    let h = t / 3600;
+
+    // 1. CONTROL DE FASES
+    let finDespacho = t >= CFG.hFinDespacho;
+    let cierrePuertas = t >= CFG.hCierre;
+    
+    if(t >= CFG.hFinTotal) fase = "FIN_FORZOSO";
+    else if(finDespacho) fase = "RETORNO";
+    else if(cierrePuertas) fase = "CIERRE";
+    else fase = "NORMAL";
+
+    // 2. GESTIÓN PARADEROS
+    if(cierrePuertas) {
+        paraderos.forEach(p => p.abierto = false);
+    }
+    paraderos.forEach(p => p.update(dt, t));
+
+    // 3. DESPACHO (Lógica de Salida)
+    if(!finDespacho) {
+        let inter = 600;
+        for(let f of CFG.frecuencias) { if(h >= f.h) inter = f.int; }
+
+        if(t >= proxSalida) {
+            // Buscar bus en Reserva (0)
+            let bus = buses.find(b => b.estado === 0);
+            
+            if(bus && choferesLibres > 0) {
+                choferesLibres--;
+                bus.estado = 2; // Salida directa a IDA para fluidez visual
+                bus.pos = 0; bus.idxP = 0; bus.pax = 0;
+                proxSalida = t + inter;
+            } else {
+                proxSalida = t + 30; // Reintentar
+            }
+        }
+    }
+
+    // 4. UPDATE BUSES
+    let activos = 0;
+    buses.forEach(b => {
+        b.update(dt, paraderos.slice(0,8), paraderos.slice(8,16), finDespacho);
+        if(b.estado === 2 || b.estado === 3) activos++;
+    });
+
+    // 5. FIN DEL DÍA (Limpieza)
+    if(fase === "FIN_FORZOSO" || (finDespacho && activos === 0 && t > CFG.hFinTotal - 1800)) {
+        running = false;
+        fase = "FIN";
+        paraderos.forEach(p => p.cola = 0); // Limpieza final de pasajeros
+        draw();
+        updateUI();
+        document.getElementById('overlay-msg').style.display = 'block';
+        document.getElementById('btn-toggle').innerText = "FINALIZADO";
+    }
+}
+
+/* ================= VISUALIZACIÓN ================= */
+function draw() {
+    // Fondo
+    ctx.fillStyle = "#455a64"; ctx.fillRect(0,0, canvas.width, canvas.height);
+
+    // Zonas Patio
+    drawZone(20, 120, 160, 300, "#546e7a", "PATIO RESERVA", "#78909c");
+    drawZone(20, 450, 160, 120, "#2e1a36", "TALLER / MANT.", "#9c27b0");
+
+    // Carreteras
+    let roadW = canvas.width - 250;
+    drawRoad(160, roadW, "IDA (Hacia Centro)");
+    drawRoad(400, roadW, "VUELTA (Hacia Patio)");
+
+    // Conectores
+    ctx.beginPath();
+    ctx.strokeStyle = "#78909c"; ctx.lineWidth = 4;
+    ctx.moveTo(180, 160); ctx.lineTo(250, 160); // Salida
+    ctx.moveTo(250 + roadW, 160); ctx.bezierCurveTo(canvas.width, 160, canvas.width, 400, 250 + roadW, 400); // Retorno
+    ctx.moveTo(250, 400); ctx.lineTo(180, 400); // Entrada
+    ctx.stroke();
+
+    // Entidades
+    paraderos.forEach(drawStop);
+    buses.sort((a,b) => a.y - b.y).forEach(drawBus);
+}
+
+function drawZone(x, y, w, h, fill, txt, border) {
+    ctx.fillStyle = fill; ctx.fillRect(x,y,w,h);
+    ctx.strokeStyle = border; ctx.lineWidth = 3; ctx.strokeRect(x,y,w,h);
+    ctx.save(); ctx.translate(x+20, y+h-10); ctx.rotate(-Math.PI/2);
+    ctx.fillStyle = "rgba(255,255,255,0.2)"; ctx.font = "bold 16px Arial"; ctx.fillText(txt, 0, 0);
+    ctx.restore();
+}
+
+function drawRoad(y, w, txt) {
+    ctx.fillStyle = "#37474f"; ctx.fillRect(250, y-25, w, 50);
+    ctx.strokeStyle = "#cfd8dc"; ctx.setLineDash([20, 15]); ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(250, y); ctx.lineTo(250+w, y); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = "rgba(255,255,255,0.1)"; ctx.font = "20px Arial"; ctx.fillText(txt, 600, y+8);
+}
+
+function drawStop(p) {
+    let py = p.esIda ? p.y-40 : p.y+10;
+    // Poste
+    ctx.fillStyle = "#263238"; ctx.fillRect(p.x-2, py, 4, 30);
+    
+    // Semáforo Estado
+    ctx.beginPath(); ctx.arc(p.x, p.esIda?py:py+30, 10, 0, Math.PI*2);
+    let color = p.abierto ? (p.cola>20?"#e53935":"#00e676") : "#d32f2f";
+    ctx.fillStyle = color; ctx.fill();
+    ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.stroke();
+
+    // Texto
+    ctx.fillStyle = "#fff"; ctx.font = "bold 9px Arial"; ctx.textAlign = "center";
+    ctx.fillText(p.abierto?"AB":"CL", p.x, p.esIda?py+3:py+33);
+    
+    ctx.fillStyle = "#eceff1"; ctx.font = "11px Arial";
+    ctx.fillText(p.nombre.split(" ")[0], p.x, p.esIda?py-10:py+55);
+
+    // Estado Cerrado
+    if(!p.abierto) {
+        ctx.fillStyle = "#ef5350"; ctx.font = "bold 9px Arial";
+        ctx.fillText("CERRADO", p.x, p.esIda?py-22:py+65);
+    }
+
+    // Cola
+    if(p.cola > 0) {
+        ctx.fillStyle = "#ffcc80"; ctx.font = "bold 11px Arial";
+        ctx.fillText(p.cola, p.x+15, p.esIda?py+15:py+15);
+    }
+}
+
+function drawBus(b) {
+    ctx.save(); ctx.translate(b.x, b.y);
+    if(b.estado===3 || (b.estado===0 && b.y>300)) ctx.scale(-1, 1);
+
+    // Color Bus
+    let color = "#78909c"; // Reserva
+    if(b.estado === 2) color = "#fdd835"; // Ida
+    if(b.estado === 3) color = "#fb8c00"; // Vuelta
+    if(b.estado === 4) color = "#9c27b0"; // Taller
+    if(b.pax >= b.cap) color = "#e53935"; // Lleno
+
+    // Cuerpo con detalles
+    ctx.fillStyle = color;
+    ctx.beginPath(); ctx.roundRect(-18, -9, 36, 18, 3); ctx.fill();
+    ctx.strokeStyle = "#000"; ctx.lineWidth = 1; ctx.stroke();
+
+    if(b.estado === 2 || b.estado === 3) {
+        // Ventanas
+        ctx.fillStyle = "#333"; ctx.fillRect(-12, -7, 24, 5);
+        // Luces
+        ctx.fillStyle = "#ffeb3b"; ctx.fillRect(16, -7, 2, 4); // Faros
+        ctx.fillStyle = "#f44336"; ctx.fillRect(-18, -7, 2, 4); // Freno
+        // Barra Carga
+        ctx.fillStyle = "#000"; ctx.fillRect(-12, 2, 24, 3);
+        ctx.fillStyle = "#00e676"; ctx.fillRect(-12, 2, 24 * (b.pax/b.cap), 3);
+    }
+    
+    // Info ID
+    ctx.fillStyle = "#000"; ctx.font = "9px Arial"; ctx.textAlign = "center";
+    ctx.fillText(b.id, 0, 4);
+    
+    // Timer Taller
+    if(b.estado === 4) {
+        ctx.fillStyle = "#fff"; ctx.font = "9px monospace";
+        let m = Math.ceil(b.timer/60);
+        ctx.fillText(m+"m", 0, -12);
+    }
+
+    ctx.restore();
+}
+
+function updateLabel(v) { document.getElementById('speed-label').innerText = v + "x"; }
+function resetSim() { location.reload(); }
+
+function updateUI() {
+    let h = Math.floor(t / 3600);
+    let m = Math.floor((t % 3600) / 60);
+    document.getElementById('clock').innerText = `${h<10?'0'+h:h}:${m<10?'0'+m:m}`;
+    document.getElementById('drivers').innerText = choferesLibres;
+    
+    let act = buses.filter(b => b.estado===2 || b.estado===3).length;
+    document.getElementById('fleet-active').innerText = `${act} / 22`;
+    
+    let mnt = buses.filter(b => b.estado===4).length;
+    document.getElementById('fleet-maint').innerText = mnt;
+    
+    document.getElementById('pax-total').innerText = stats.atendidos.toLocaleString();
+    
+    let w = paraderos.reduce((acc, p) => acc + p.cola, 0);
+    document.getElementById('pax-wait').innerText = w;
+    
+    document.getElementById('sys-phase').innerText = fase;
+    if(fase === "CIERRE") document.getElementById('sys-phase').style.background = "#ef6c00";
+    if(fase === "RETORNO") document.getElementById('sys-phase').style.background = "#c62828";
+}
+
+// Polyfill roundRect
+if (!CanvasRenderingContext2D.prototype.roundRect) {
+    CanvasRenderingContext2D.prototype.roundRect = function (x, y, w, h, r) {
+        if (w < 2 * r) r = w / 2; if (h < 2 * r) r = h / 2;
+        this.beginPath(); this.moveTo(x+r, y); this.arcTo(x+w, y, x+w, y+h, r);
+        this.arcTo(x+w, y+h, x, y+h, r); this.arcTo(x, y+h, x, y, r);
+        this.arcTo(x, y, x+w, y, r); this.closePath(); return this;
+    };
+}
+</script>
+</body>
+</html>
